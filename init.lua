@@ -7,6 +7,7 @@ local lz = require"lz"
 local gzcompress = lz.gzcompress
 local gzuncompress = lz.gzuncompress
 
+local type = type
 local ipairs = ipairs
 local spack = string.pack
 local sunpack = string.unpack
@@ -34,6 +35,7 @@ function grpc:loadfiles(file_list)
 end
 
 function grpc:encode(message_name, message_table)
+  assert(type(message_name) == 'string' and type(message_table) == 'table', "Invalid GRPC `message_name` or `message_table`")
   local pbmsg = pbencode(message_name, message_table)
   if self.compressed then
     pbmsg = gzcompress(pbmsg)
@@ -42,6 +44,7 @@ function grpc:encode(message_name, message_table)
 end
 
 function grpc:decode(message_name, rawdata)
+  assert(type(message_name) == 'string' and type(rawdata) == 'string', "Invalid GRPC `message_name` or `rawdata`")
   local tab
   local compressed, len, index = sunpack(">BI4", rawdata)
   if compressed ~= 0x00 then
