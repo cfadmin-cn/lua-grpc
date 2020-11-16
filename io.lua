@@ -17,8 +17,6 @@ local class = require "class"
 
 local client = class("%s")
 
-%s
-
 return client
 ]]
 local server_template = [[
