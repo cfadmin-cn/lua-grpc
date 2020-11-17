@@ -80,6 +80,7 @@ function grpc:auto_complete(fordel)
     for key, info in pairs(self.services) do
       grpcio.toFile(fordel, key, info)
     end
+    grpcio.writeFile(fordel .. "/map.lua", self.services)
   end
   return true
 end

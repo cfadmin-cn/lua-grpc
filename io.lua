@@ -7,6 +7,8 @@ local concat = table.concat
 
 local io_open = io.open
 
+local json = require "json"
+
 local lfs = require "lfs"
 local mkdir = lfs.mkdir
 local stat = lfs.attributes
@@ -18,18 +20,35 @@ local class = require "class"
 
 local client = class("%s")
 
+local type = type
+local pairs = pairs
+local assert = assert
+
 function client:ctor(opt)
-	self.grpc = opt.grpc
-	self.httpc = opt.httpc
-	self.map = {%s}
+  assert(type(opt) == 'table', "Invalid rpc parms.")
+	self.grpc = assert(opt.grpc, "rpc client need grpc ctx.")
+	self.httpc = assert(opt.httpc, "rpc client need http2 ctx.")
+	self.map = %s
 end
 
-function client:call(method, url, headers, body, timeout)
-	local response, errinfo = self.httpc:request(url, headers, self.grpc:encode(self.map[method].req, body), timeout)
-	if not response then
-		return nil, errinfo
+function client:call(method, headers, body, timeout)
+	local h = {
+    ["te"] = "trailers",
+    ["content-type"] = "application/grpc",
+    ["grpc-accept-encoding"] = "gzip, identity"
+  }
+  local q = assert(type(method) == 'string' and self.map[method], "Can't find rpc method.")
+  assert(type(body) == "table", "Invalid headers.")
+  if type(headers) == "table" then
+	  for k, v in pairs(headers) do
+	  	h[k] = v
+	  end
 	end
-	response.body = self.grpc:decode(self.map[method].resp, response.body)
+	local response, errinfo = self.httpc:request(q.url, "POST", h, self.grpc:encode(q.req, body), timeout)
+	if type(response) ~= 'table' or not response.body or response.body == '' then
+		return nil, errinfo or "error response."
+	end
+	response.body = self.grpc:decode(q.resp, response.body)
 	return response
 end
 
@@ -43,16 +62,16 @@ local server = { name = "%s" }
 return server
 ]]
 
-local function fmt_client(filename, info)
-	local tab = {}
-	-- var_dump(info)
+local function fmt_client(folder, filename, info)
 	for method, id in pairs(info) do
-		tab[#tab+1] = method .. " = " .. "{ " .. ( "req = '" .. id.pkg .. id.req .. "', ") .. ( "resp = '" .. id.pkg .. id.resp .. "'") .. " }"
+		id.req = id.pkg .. id.req
+		id.resp = id.pkg .. id.resp
+		id.url = concat({"/", filename, "/", method})
 	end
-	return fmt(client_template, filename, concat(tab, ", "))
+	return fmt(client_template, filename, fmt("require(\"%s.map\")['%s']", folder, filename))
 end
 
-local function fmt_server(filename, info)
+local function fmt_server(folder, filename, info)
 	local tab = {}
 	for method, id in pairs(info) do
 		tab[#tab+1] = fmt([[
@@ -85,14 +104,14 @@ function IO.toFile(folder, filename, info)
 	local cstat, sstat = stat(cfilename), stat(sfilename)
 	if not cstat or cstat.mode ~= "file" then
 		local f = assert(io_open(cfilename, "w"))
-		f:write(fmt_client(filename, info))
+		f:write(fmt_client(folder, filename, info))
 		f:flush()
 		f:close()
 		print("  Create client file: " .. cfilename)
 	end
 	if not sstat or sstat.mode ~= "file" then
 		local f = assert(io_open(sfilename, "w"))
-		f:write(fmt_server(filename, info))
+		f:write(fmt_server(folder, filename, info))
 		f:flush()
 		f:close()
 		print("  Create server file: " .. sfilename)
@@ -101,13 +120,16 @@ function IO.toFile(folder, filename, info)
 	return print("  OK.")
 end
 
--- 去除注释
+-- 去除单行注释与多行注释
 function IO.toUncomment(proto)
-  -- proto = gsub(proto, "%/%/[^%\r%\n]+", "")   -- 去除单行注释
-  -- proto = gsub(proto, "/%*[^%*%/]+*/", "")    -- 去除多行注释
-  -- return proto
-  -- return proto:gsub("%/%/[^%\r%\n]+", ""):gsub("/%*[^%*%/]+*/", "")
   return gsub(gsub(proto, "%/%/[^%\r%\n]+", ""), "/%*[^%*%/]+*/", "")
 end
 
+-- 写入配置文件: fordel .. "/map.lua"
+function IO.writeFile(filename, map)
+  local f = assert(io.open(filename, "wb"), "Failed to create `map.lua` file.")
+  f:write("return require('json').decode([[" .. json.encode(map) .."]])")
+  f:flush()
+  f:close()
+end
 return IO
