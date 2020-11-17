@@ -18,6 +18,7 @@ local pairs = pairs
 local ipairs = ipairs
 local assert = assert
 
+local match = string.match
 local splite = string.gmatch
 local spack = string.pack
 local sunpack = string.unpack
@@ -39,26 +40,46 @@ function grpc:ctor(opt)
   self.services = {}
 end
 
--- 加载protobuf协议
+function grpc:no_services()
+  self.services = nil
+end
+
+-- 从字符串加载protobuf协议内容
 function grpc:load(proto)
-  if self.protoc:load(proto) then
-    for service_prefix, service_list in splite(proto, service_regex) do
-      self.services[service_prefix] = assert(not self.services[service_prefix] and {}, '`' .. service_prefix .. "` is repeatedly defined")
-      for service_name, req_name, resp_name in splite(service_list, service_mathod_regex) do
-        self.services[service_prefix][service_name] = { req_name = req_name, resp_name = resp_name }
+  if self.protoc:load(proto) and self.services then
+    local proto = grpcio.toUncomment(proto)
+    local pkg = match(proto, "package ([^ ;]+)[ ;]-") or ""
+    if pkg ~= "" then
+      pkg = pkg .. "."
+    end
+    for service, service_list in splite(proto, service_regex) do
+      self.services[service] = assert(not self.services[service] and {}, 'service[`' .. service .. "`] is repeatedly defined")
+      for method, req, resp in splite(service_list, service_mathod_regex) do
+        self.services[service][method] = { pkg = pkg, req = req, resp = resp }
       end
-    end 
+    end
   end
   return true
 end
 
+-- 从文件加载protobuf协议内容
+function grpc:loadfile(filename)
+  -- 尝试读取文件
+  local f = assert(io.open(filename), "r")
+  local proto = f:read "*a"
+  f:close()
+  return self:load(proto)
+end
+
 -- 自动生成代码
 function grpc:auto_complete(fordel)
-  -- 没有任何协议定义的`服务`
-  assert(next(self.services), "The protocol file that supports the service definition is not detected.")
-  lfs.mkdir(fordel)
-  for key, info in pairs(self.services) do
-    grpcio.toFile(fordel, key, info)
+  if self.services then
+    -- 没有任何协议定义的`服务`
+    assert(next(self.services), "The protocol file that supports the service definition is not detected.")
+    lfs.mkdir(fordel)
+    for key, info in pairs(self.services) do
+      grpcio.toFile(fordel, key, info)
+    end
   end
   return true
 end

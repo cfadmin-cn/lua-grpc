@@ -1,7 +1,8 @@
 local print = print
 local assert = assert
-local fmt = string.format
 
+local fmt = string.format
+local gsub = string.gsub
 local concat = table.concat
 
 local io_open = io.open
@@ -17,25 +18,53 @@ local class = require "class"
 
 local client = class("%s")
 
+function client:ctor(opt)
+	self.grpc = opt.grpc
+	self.httpc = opt.httpc
+	self.map = {%s}
+end
+
+function client:call(method, url, headers, body, timeout)
+	local response, errinfo = self.httpc:request(url, headers, self.grpc:encode(self.map[method].req, body), timeout)
+	if not response then
+		return nil, errinfo
+	end
+	response.body = self.grpc:decode(self.map[method].resp, response.body)
+	return response
+end
+
 return client
 ]]
+
 local server_template = [[
-local class = require "class"
+local server = { name = "%s" }
 
-local server = class("%s")
-
+%s
 return server
 ]]
 
 local function fmt_client(filename, info)
-	return fmt(client_template, filename)
+	local tab = {}
+	-- var_dump(info)
+	for method, id in pairs(info) do
+		tab[#tab+1] = method .. " = " .. "{ " .. ( "req = '" .. id.pkg .. id.req .. "', ") .. ( "resp = '" .. id.pkg .. id.resp .. "'") .. " }"
+	end
+	return fmt(client_template, filename, concat(tab, ", "))
 end
 
 local function fmt_server(filename, info)
-	return fmt(server_template, filename)
+	local tab = {}
+	for method, id in pairs(info) do
+		tab[#tab+1] = fmt([[
+function server.%s(context)
+	return pbencode("%s", { })
+end
+]], method, id.pkg .. id.resp)
+	end
+	return fmt(server_template, filename, concat(tab, "\r\n"))
 end
 
--- 自动生成代码文件, 永远不会覆盖文件
+-- 自动生成代码文件(不会覆盖文件)
 function IO.toFile(folder, filename, info)
 
 	-- 开始检查并创建文件
@@ -70,6 +99,15 @@ function IO.toFile(folder, filename, info)
 	end
 
 	return print("  OK.")
+end
+
+-- 去除注释
+function IO.toUncomment(proto)
+  -- proto = gsub(proto, "%/%/[^%\r%\n]+", "")   -- 去除单行注释
+  -- proto = gsub(proto, "/%*[^%*%/]+*/", "")    -- 去除多行注释
+  -- return proto
+  -- return proto:gsub("%/%/[^%\r%\n]+", ""):gsub("/%*[^%*%/]+*/", "")
+  return gsub(gsub(proto, "%/%/[^%\r%\n]+", ""), "/%*[^%*%/]+*/", "")
 end
 
 return IO
