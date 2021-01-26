@@ -3,6 +3,8 @@ local new_tab = sys.new_tab
 
 local cf = require "cf"
 
+local LOG = require "logging":new { dumped = true, path = "grpcio"}
+
 local pb = require "protobuf"
 local pbencode = pb.encode
 local pbdecode = pb.decode
@@ -43,8 +45,15 @@ function grpcio:ctor(opt)
   self.services = {}
   self.pool = new_tab(64, 0)
   self.protoc = protoc:new()
-  self.domain = assert(type(opt) == 'table' and opt.domain, "Invalid grpc server domain.")
-  self.compressed = opt.compressed and 0x01 or 0x00
+  if type(opt) == "table" then
+    self.domain = opt.domain or "http://localhost/"
+    self.port = 8080
+    self.compressed = opt.compressed and 0x01 or 0x00
+  else
+    self.domain = "http://localhost/"
+    self.port = 8080
+    self.compressed = 0x00
+  end
 end
 
 function grpcio:no_services()
@@ -60,7 +69,7 @@ function grpcio:load(proto)
       pkg = pkg .. "."
     end
     for service, service_list in splite(proto, service_regex) do
-      self.services[service] = assert(not self.services[service] and {}, 'service[`' .. service .. "`] is repeatedly defined")
+      self.services[service] = assert(not self.services[service] and {}, 'WARNING: service[`' .. service .. "`] is repeatedly defined")
       for method, req, resp in splite(service_list, service_mathod_regex) do
         self.services[service][method] = { pkg = pkg, req = req, resp = resp }
       end
@@ -92,23 +101,25 @@ function grpcio:call(service, name, body, timeout)
       end
       client:close()
       client = nil
+      cf.sleep(1)
+      LOG:WARN("The grpc client cannot connect to the server! Retrying...")
     end
   end
   local response = client:request(fmt("/%s/%s", service, name), "POST", { ["te"] = "trailers", ["content-type"] = "application/grpc", ["grpc-accept-encoding"] = "gzip,identity" }, self:encode(method.pkg .. method.req, body), timeout)
   if type(response) ~= 'table' then
-    client:close(); client = nil; 
+    client:close(); client = nil;
     return self:call(service, name, body, timeout)
   end
   -- var_dump(response)
   insert(self.pool, client)
   -- 服务器发生错误的时候.
   if toint(response["headers"]["grpc-status"]) ~= 0 then
-    return nil, response["headers"]["grpc-message"]
+    return nil, response["headers"]["grpc-message"] or "Unknown grpc error."
   end
   -- 如果不是GRPC响应类型
   local content_type = lower(response["headers"]["content-type"] or "")
   if content_type ~= "application/grpc" and content_type ~= "application/grpc+proto" then
-    return nil, "Invalid grpc server content-type : " .. (response["headers"]["content-type"] or "")
+    return nil, "Invalid grpc server content-type : " .. (response["headers"]["content-type"] or "Unknown grpc content-type.")
   end
   return self:decode(method.pkg .. method.resp, response.body, response["headers"]["grpc-encoding"])
 end
