@@ -40,6 +40,9 @@ local class = require "class"
 
 local grpcio = class("class")
 
+---@class grpcio
+---@field private domain string @连接域名
+---@field private port integer @监听端口
 function grpcio:ctor(opt)
   self.version = "0.1"
   self.services = {}
@@ -48,19 +51,15 @@ function grpcio:ctor(opt)
   if type(opt) == "table" then
     self.domain = opt.domain or "http://localhost/"
     self.port = opt.port or 8080
-    self.compressed = opt.compressed and 0x01 or 0x00
   else
     self.domain = "http://localhost/"
     self.port = 8080
-    self.compressed = 0x00
   end
 end
 
-function grpcio:no_services()
-  self.services = nil
-end
-
--- 从字符串加载protobuf协议内容
+---comment 从字符串内容加载protobuf协议
+---@param proto string @protobuf内容
+---@return grpcio
 function grpcio:load(proto)
   proto = gsub(gsub(proto, "%/%/[^%\r%\n]+", ""), "/%*.+%*/", "")
   if self.protoc:load(proto) and self.services then
@@ -79,7 +78,9 @@ function grpcio:load(proto)
   return self
 end
 
--- 从文件加载protobuf协议内容
+---comment 从给定的文件路径中加载protobuf协议文件
+---@param filename string @protobuf文件名
+---@return grpcio
 function grpcio:loadfile(filename)
   -- 尝试读取文件
   local f = assert(io.open(filename), "r")
@@ -88,10 +89,15 @@ function grpcio:loadfile(filename)
   return self:load(proto)
 end
 
--- 发起远程调用
-function grpcio:call(service, name, body, timeout)
+---comment 发起远程调用
+---@param service_name string @服务名称
+---@param method_name string @方法名称
+---@param body table @请求内容
+---@param timeout number @重试时间
+---@return table<any, any> | nil, string
+function grpcio:call(service_name, method_name, body, timeout)
   -- RPC Service
-  local method = assert(self.services[service] and self.services[service][name], "Invalid grpc service or method.")
+  local obj = assert(self.services[service_name] and self.services[service_name][method_name], "Invalid grpc service or method.")
   local client = remove(self.pool)
   if not client then
     while 1 do
@@ -105,10 +111,10 @@ function grpcio:call(service, name, body, timeout)
       LOG:WARN("The grpc client cannot connect to the server! Retrying...")
     end
   end
-  local response = client:request(fmt("/%s/%s", service, name), "POST", { ["te"] = "trailers", ["content-type"] = "application/grpc", ["grpc-accept-encoding"] = "gzip,identity" }, self:encode(method.pkg .. method.req, body), timeout)
+  local response = client:request(fmt("/%s/%s", service_name, method_name), "POST", { ["te"] = "trailers", ["content-type"] = "application/grpc", ["grpc-accept-encoding"] = "gzip,identity" }, self:encode(obj.pkg .. obj.req, body), timeout)
   if type(response) ~= 'table' then
     client:close(); client = nil;
-    return self:call(service, name, body, timeout)
+    return self:call(service_name, method_name, body, timeout)
   end
   -- var_dump(response)
   insert(self.pool, client)
@@ -121,17 +127,24 @@ function grpcio:call(service, name, body, timeout)
   if content_type ~= "application/grpc" and content_type ~= "application/grpc+proto" then
     return nil, "Invalid grpc server content-type : " .. (response["headers"]["content-type"] or "Unknown grpc content-type.")
   end
-  return self:decode(method.pkg .. method.resp, response.body, response["headers"]["grpc-encoding"])
+  return self:decode(obj.pkg .. obj.resp, response.body, response["headers"]["grpc-encoding"])
 end
 
--- GRPC编码
+---comment `GRPC`的序列化方法
+---@param message_name string @package与message name
+---@param message_table table @待序列化的table
+---@return string @序列化成功将返回table
 function grpcio:encode(message_name, message_table)
   assert(type(message_name) == 'string' and type(message_table) == 'table', "Invalid GRPC `message_name` or `message_table`")
   local pbmsg = pbencode(message_name, message_table)
   return spack(">BI4", 0x00, #pbmsg) .. pbmsg
 end
 
--- GRPC解码
+---comment `GRPC`的反序列化方法
+---@param message_name string @package与message name
+---@param rawdata string @待反序列化的string
+---@param compressed string | nil @`nil`表示不需要未压缩, `gzip`、`deflate`表示指定格式
+---@return any
 function grpcio:decode(message_name, rawdata, compressed)
   assert(type(message_name) == 'string' and type(rawdata) == 'string', "Invalid GRPC `message_name` or `rawdata`")
   if sunpack(">BI4", rawdata) == 0x01 then
