@@ -47,7 +47,7 @@ function grpcio:ctor(opt)
   self.protoc = protoc:new()
   if type(opt) == "table" then
     self.domain = opt.domain or "http://localhost/"
-    self.port = 8080
+    self.port = opt.port or 8080
     self.compressed = opt.compressed and 0x01 or 0x00
   else
     self.domain = "http://localhost/"
