@@ -1,41 +1,45 @@
 require "utils"
 
-local grpc = require "grpc"
+local cf = require"cf"
 
-local g = grpc:new()
+local grpc = require "lua-grpc.io"
+
+local g = grpc:new( {
+  -- compressed = true,
+  domain = "http://localhost/"
+})
 
 g:load([[
+  syntax = "proto3";
+  package info;
+  service Greeter {
+    rpc SayHello(HelloRequest) returns (HelloReply);
+    rpc SayHelloAgain(HelloRequest) returns (HelloReply);
+  }
+  
+  message HelloRequest {
+    string name = 1;
+  }
 
-// 语法
-syntax = "proto3";
-
-// 包名称
-package test;
-
-// 服务 1
-service human {
-  rpc h_add (Object) returns (Object);
-  rpc h_find (Object) returns (Object);
-}
-
-// 服务 2
-service persion {
-  rpc p_add (Object) returns (Object);
-  rpc p_find (Object) returns (Object);
-}
-
-// 消息定义
-message Object {
-  required string name = 1;
-  required int32  age  = 2;
-}
-
+  message HelloReply {
+    string message = 1;
+  }
 ]])
 
-local raw = g:encode("test.Object", { name = "車", age = 11 })
+cf.fork(function()
+  local ret, err = g:call("Greeter", "SayHello", { name = "車先生" }, 5 --[[ 重试时间(秒) ]])
+  if not ret then
+    return print(ret, err)
+  end
+  var_dump(ret)
+end)
 
-local tab = g:decode("test.Object", raw)
+cf.fork(function()
+  local ret, err = g:call("Greeter", "SayHello", { name = "車爪鱼" }, 10 --[[ 重试时间(秒) ]])
+  if not ret then
+    return print(ret, err)
+  end
+  var_dump(ret)
+end)
 
-var_dump(tab)
-
--- g:auto_complete("rpc")
+return require "cf".wait()
