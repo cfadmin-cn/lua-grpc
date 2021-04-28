@@ -1,5 +1,7 @@
 local cf = require "cf"
 
+local aio = require "aio"
+
 local LOG = require "logging"
 
 local httpc2 = require "lua-http2.httpc"
@@ -63,7 +65,7 @@ end
 
 ---comment 从字符串内容加载protobuf协议
 ---@param proto string @protobuf内容
----@return grpcio
+---@return table @grpc client
 function client:load(proto)
   proto = gsub(gsub(proto, "%/%/[^%\r%\n]+", ""), "/%*.+%*/", "")
   if self.protoc:load(proto) and self.services then
@@ -82,11 +84,25 @@ end
 
 ---comment 从给定的文件路径中加载protobuf协议文件
 ---@param filename string @protobuf文件名
----@return grpcio
+---@return table @grpc client
 function client:loadfile(filename)
   -- 尝试读取文件
-  local f = assert(io.open(filename), "rb")
-  return self:load(f:read "*a"), f:close()
+  local f = assert(io.open(filename, "rb"))
+  self:load(f:read "*a")
+  f:close()
+  return self
+end
+
+---comment 从给定的文件路径中加载protobuf协议文件
+---@param dir string @`pb`文件存储目录
+---@return table @grpc client
+function client:loaddir(dir)
+  for _, fname in ipairs(aio.dir(dir)) do
+    if (fname ~= '.' and fname ~= '..') and (fname:match(".+%.pb$") or fname:match(".+%.proto$") or fname:match(".+%.pb2$") or fname:match(".+%.pb3$")) then
+      self:loadfile(fname)
+    end
+  end
+  return self
 end
 
 ---comment 发起远程调用
