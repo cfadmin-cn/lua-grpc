@@ -37,6 +37,7 @@ local service_mathod_regex = "rpc[ ]*([^ ]+)[ ]*%(([^%)%(]+)%)[ ]*returns[ ]*%((
 local function new_session(self)
   while true do
     local httpc = httpc2:new { domain = self.domain }
+    httpc:no_alpn()
     if httpc:connect() then
       return httpc
     end
